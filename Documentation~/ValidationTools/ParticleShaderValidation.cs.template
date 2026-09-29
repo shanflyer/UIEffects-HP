@@ -1,0 +1,80 @@
+using System;
+using System.IO;
+using System.Linq;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+using Object = UnityEngine.Object;
+
+namespace ShanFlyer.UIEffects
+{
+    public static class ParticleShaderValidation
+    {
+        public static void Run()
+        {
+            try
+            {
+                var args = Environment.GetCommandLineArgs();
+                string Arg(string name) => args[Array.IndexOf(args, name) + 1];
+                var target = (ParticleShaderGenerator.Target)Enum.Parse(typeof(ParticleShaderGenerator.Target), Arg("-shaderTarget"));
+                string output = ParticleShaderGenerator.GenerateFromSource(Arg("-shaderSource"), target, Arg("-shaderVersion"), "Validation source");
+                var shaders = Directory.GetFiles(output, "*.shader").Select(p => AssetDatabase.LoadAssetAtPath<Shader>(p.Replace('\\', '/'))).ToArray();
+                foreach (var shader in shaders)
+                {
+                    if (!shader || ShaderUtil.ShaderHasError(shader)) throw new Exception("Shader compilation failed: " + shader);
+                    var material = new Material(shader);
+                    try
+                    {
+                        foreach (var property in new[] { "_Stencil", "_StencilComp", "_StencilOp", "_StencilReadMask", "_StencilWriteMask", "_ColorMask" })
+                            if (!material.HasProperty(property)) throw new Exception(shader.name + " missing " + property);
+                        if (!UIEffectSpriteMask.Supports(material)) throw new Exception("Generated shader not recognized by SpriteMask.");
+                    }
+                    finally { Object.DestroyImmediate(material); }
+                }
+                VerifyStencil(shaders.Single(s => s.name.EndsWith(target == ParticleShaderGenerator.Target.BuiltIn
+                    ? "Legacy Shaders/Particles/Additive" : "Universal Render Pipeline/Particles/Unlit", StringComparison.Ordinal)));
+                Directory.CreateDirectory("Logs");
+                File.WriteAllText("Logs/particle-shader-generation.txt", "PASS " + target + ": " + shaders.Length + " shaders; properties, imports and SpriteMask contract; GPU stencil clipping\n" + output);
+                EditorApplication.Exit(0);
+            }
+            catch (Exception e) { Debug.LogException(e); EditorApplication.Exit(1); }
+        }
+        private static void VerifyStencil(Shader shader)
+        {
+            var writer = new Material(Shader.Find("ShanFlyer/UI Effects/Additive"));
+            var effect = new Material(shader);
+            var mesh = new Mesh();
+            mesh.vertices = new[] { new Vector3(-1,-1,0), new Vector3(-1,1,0), new Vector3(1,1,0), new Vector3(1,-1,0) };
+            mesh.uv = new[] { Vector2.zero, Vector2.up, Vector2.one, Vector2.right };
+            mesh.colors = Enumerable.Repeat(Color.white, 4).ToArray();
+            mesh.triangles = new[] { 0, 1, 2, 2, 3, 0 };
+            var target = new RenderTexture(64, 64, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            target.Create();
+            var read = new Texture2D(64, 64, TextureFormat.RGBA32, false, true);
+            var commands = new CommandBuffer();
+            try
+            {
+                writer.SetInt("_Stencil", 1); writer.SetInt("_StencilComp", (int)CompareFunction.Always);
+                writer.SetInt("_StencilOp", (int)StencilOp.Replace); writer.SetInt("_ColorMask", 0);
+                effect.SetInt("_Stencil", 1); effect.SetInt("_StencilComp", (int)CompareFunction.Equal);
+                effect.SetInt("_StencilWriteMask", 0);
+                if (effect.HasProperty("_TintColor")) effect.SetColor("_TintColor", Color.white);
+                if (effect.HasProperty("_BaseColor")) effect.SetColor("_BaseColor", Color.white);
+                if (effect.HasProperty("_Cull")) effect.SetInt("_Cull", 0);
+                commands.SetRenderTarget(target); commands.ClearRenderTarget(true, true, Color.black);
+                commands.SetViewProjectionMatrices(Matrix4x4.identity, GL.GetGPUProjectionMatrix(Matrix4x4.Ortho(-1,1,-1,1,-1,1), true));
+                commands.DrawMesh(mesh, Matrix4x4.TRS(new Vector3(-.5f,0,0), Quaternion.identity, new Vector3(.5f,1,1)), writer, 0, 0);
+                commands.DrawMesh(mesh, Matrix4x4.identity, effect, 0, 0);
+                Graphics.ExecuteCommandBuffer(commands);
+                var previous = RenderTexture.active;
+                try { RenderTexture.active = target; read.ReadPixels(new Rect(0,0,64,64),0,0); read.Apply(); }
+                finally { RenderTexture.active = previous; }
+                var inside = read.GetPixel(16,32); var outside = read.GetPixel(48,32);
+                if (Mathf.Min(inside.r, Mathf.Min(inside.g, inside.b)) < .9f
+                    || Mathf.Max(outside.r, Mathf.Max(outside.g, outside.b)) > .01f)
+                    throw new Exception("Generated shader did not obey stencil coverage.");
+            }
+            finally { commands.Release(); target.Release(); Object.DestroyImmediate(target); Object.DestroyImmediate(read); Object.DestroyImmediate(mesh); Object.DestroyImmediate(writer); Object.DestroyImmediate(effect); }
+        }
+    }
+}

@@ -1,0 +1,20 @@
+{
+    "name": "ShanFlyer.UIEffects.Editor.Tests",
+    "references": [
+        "ShanFlyer.UIEffects",
+        "ShanFlyer.UIEffects.Editor",
+        "UnityEngine.UI"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": []
+}

@@ -1,0 +1,35 @@
+# Editor and OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.pdb
+*.mdb
+bin/
+obj/
+
+# Keep Unity host projects and generated output outside this package.
+/Assets/
+/Packages/
+/ProjectSettings/
+/Library/
+/Temp/
+/Logs/
+/UserSettings/
+/Build/
+/Builds/
+/TempDiag/
+/TestResults/
+/ProfilerAIExports/
+*.unitypackage
+*.apk
+*.aab

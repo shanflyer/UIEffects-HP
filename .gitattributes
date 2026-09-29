@@ -1,0 +1,65 @@
+# Unity 项目通用 .gitattributes
+# 文本文件统一换行；Unity YAML 保持原样，便于 UnityYAMLMerge 与差异阅读。
+
+* text=auto eol=lf
+
+# ---- Unity 资产 (YAML，不做换行转换) ----
+*.meta               -text
+*.unity              -text
+*.prefab             -text
+*.asset              -text
+*.mat                -text
+*.anim               -text
+*.controller         -text
+*.overrideController -text
+*.physicMaterial     -text
+*.physicsMaterial2D  -text
+*.playable           -text
+*.signal             -text
+*.mask               -text
+*.shadervariants     -text
+*.preset             -text
+*.compute            -text
+
+# ---- 二进制资产 ----
+*.dll    binary
+*.so     binary
+*.a      binary
+*.dylib  binary
+*.exe    binary
+*.pdb    binary
+*.mdb    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.tga    binary
+*.tif    binary
+*.tiff   binary
+*.bmp    binary
+*.psd    binary
+*.exr    binary
+*.fbx    binary
+*.obj    binary
+*.blend  binary
+*.cubemap binary
+*.unitypackage binary
+*.aab    binary
+*.apk    binary
+*.jar    binary
+*.aar    binary
+*.wav    binary
+*.mp3    binary
+*.ogg    binary
+*.ttf    binary
+*.otf    binary
+
+# ---- 语言 ----
+*.cs     text diff=csharp eol=lf
+*.shader text eol=lf
+*.hlsl   text eol=lf
+*.cginc  text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf

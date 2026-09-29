@@ -1,0 +1,29 @@
+using UnityEngine;
+using ShanFlyer.UIEffects;
+public sealed class PlayerSmoke : MonoBehaviour
+{
+    private ParticleSystem source;
+    private Material material;
+    private int observedBakes;
+    private float began;
+    private void Start()
+    {
+        began = Time.realtimeSinceStartup;
+        var canvas = new GameObject("Smoke Canvas", typeof(Canvas)); canvas.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+        var root = new GameObject("Smoke effect", typeof(RectTransform)); root.transform.SetParent(canvas.transform, false);
+        var emitter = new GameObject("Smoke particles", typeof(ParticleSystem)); emitter.transform.SetParent(root.transform, false);
+        source = emitter.GetComponent<ParticleSystem>(); var main = source.main; main.startLifetime = 5;
+        material = new Material(Shader.Find("UI/Default")); emitter.GetComponent<ParticleSystemRenderer>().sharedMaterial = material;
+        var effect = root.AddComponent<UIEffectRenderer>(); effect.unitConversion = global::ShanFlyer.UIEffects.UIEffectRenderer.UnitConversion.Manual; effect.uniformScale = 20;
+        effect.simulationRole = UIEffectRenderer.SimulationRole.Automatic;
+        effect.RefreshSources(); Instantiate(root, canvas.transform); effect.Play();
+    }
+    private void Update()
+    {
+        observedBakes += UIEffectProfiler.completed.bakeOps;
+        if (Time.realtimeSinceStartup - began < 3) return;
+        bool valid = source && source.particleCount > 0 && observedBakes > 0;
+        Debug.Log("UI_EFFECTS_PLAYER_SMOKE " + (valid ? "PASS" : "FAIL") + " particles=" + (source ? source.particleCount : -1) + " bakes=" + observedBakes);
+        Application.Quit(valid ? 0 : 1);
+    }
+}

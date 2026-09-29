@@ -1,0 +1,10 @@
+{
+    "name": "ShanFlyer.UIEffects",
+    "references": [
+        "UnityEngine.UI"
+    ],
+    "optionalUnityReferences": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false
+}

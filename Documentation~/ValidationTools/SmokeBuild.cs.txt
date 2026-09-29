@@ -1,0 +1,21 @@
+using UnityEditor;
+using UnityEditor.Build.Reporting;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+public static class SmokeBuild
+{
+    public static void Build()
+    {
+        var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+        new GameObject("Smoke runner", typeof(PlayerSmoke));
+        EditorSceneManager.SaveScene(scene, "Assets/PlayerSmoke.unity");
+        var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
+        {
+            scenes = new[] { "Assets/PlayerSmoke.unity" },
+            locationPathName = "PlayerSmoke/UIEffectsSmoke.exe",
+            target = BuildTarget.StandaloneWindows64, options = BuildOptions.Development
+        });
+        Debug.Log("UI_EFFECTS_PLAYER_BUILD " + report.summary.result);
+        EditorApplication.Exit(report.summary.result == BuildResult.Succeeded ? 0 : 1);
+    }
+}
