@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using ShanFlyer.UIEffects.Internal;
 
 namespace ShanFlyer.UIEffects
@@ -12,25 +13,31 @@ namespace ShanFlyer.UIEffects
         {
             internal readonly Material source;
             internal readonly Texture texture;
-            internal readonly bool meshUiQueue;
+            internal readonly bool meshCopy;
             private readonly UnityEngine.Object owner;
-            internal Key(Material source, Texture texture, UnityEngine.Object owner, bool meshUiQueue)
-            { this.source = source; this.texture = texture; this.owner = owner; this.meshUiQueue = meshUiQueue; }
+            internal Key(Material source, Texture texture, UnityEngine.Object owner, bool meshCopy)
+            { this.source = source; this.texture = texture; this.owner = owner; this.meshCopy = meshCopy; }
             public bool Equals(Key other) => ReferenceEquals(source, other.source)
                 && ReferenceEquals(texture, other.texture) && ReferenceEquals(owner, other.owner)
-                && meshUiQueue == other.meshUiQueue;
+                && meshCopy == other.meshCopy;
             public override bool Equals(object other) => other is Key key && Equals(key);
-            public override int GetHashCode() => HashCode.Combine(source, texture, owner, meshUiQueue);
+            public override int GetHashCode() => HashCode.Combine(source, texture, owner, meshCopy);
         }
-        private sealed class Variant { internal Material value; internal int users; }
+        private sealed class Variant
+        {
+            internal Material value;
+            internal int users;
+        }
         private static readonly Dictionary<Key, Variant> variants = new();
         private Key key;
         private Variant held;
 
-        internal Material Resolve(Material source, Texture texture, UnityEngine.Object propertyOwner, bool meshUiQueue = false)
+        internal Material Resolve(Material source, Texture texture, UnityEngine.Object propertyOwner,
+            bool meshCopy = false)
         {
-            if (!source || (!texture && !propertyOwner && !meshUiQueue)) { Dispose(); return source; }
-            var requested = new Key(source, texture, propertyOwner, meshUiQueue);
+            if (!source || (!texture && !propertyOwner && !meshCopy))
+            { Dispose(); return source; }
+            var requested = new Key(source, texture, propertyOwner, meshCopy);
             if (held == null || !held.value || !key.Equals(requested))
             {
                 Dispose();
@@ -42,20 +49,25 @@ namespace ShanFlyer.UIEffects
                 }
                 held.users++;
             }
-            held.value.CopyPropertiesFromMaterial(source);
+            CopyToCanvas(held.value, source, meshCopy);
             if (texture) held.value.mainTexture = texture;
-            if (meshUiQueue) ApplyMeshQueue(held.value);
             return held.value;
         }
 
-        internal static void ApplyMeshQueue(Material material)
+        internal static void CopyToCanvas(Material destination, Material source, bool meshCopy = false)
         {
-            // Scene-view UI is emitted as camera geometry. An opaque queue can put
-            // the mesh before the UI depth-reset draws (and into depth priming).
-            // Queue selection does NOT change ZWrite/ZTest, Blend, Cull or keywords.
-            if (material && material.renderQueue != (int)UnityEngine.Rendering.RenderQueue.Transparent)
-                material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            // Keep the assigned shader, including when the source changes at runtime.
+            // Canvas submission must not substitute a generated shader dependency.
+            var shader = source.shader;
+            if (destination.shader != shader) destination.shader = shader;
+            destination.CopyPropertiesFromMaterial(source);
+            // Camera rendering sorts queues before Canvas hierarchy order. A mesh
+            // left in Geometry can draw before both its depth reset and preceding
+            // UI. Only the transient Canvas copy joins the UI queue; source assets
+            // and the shader's depth, cull and blend state stay unchanged.
+            if (meshCopy) destination.renderQueue = (int)RenderQueue.Transparent;
         }
+
         public void Dispose()
         {
             if (held == null) return;

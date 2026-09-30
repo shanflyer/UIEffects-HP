@@ -65,6 +65,10 @@ namespace ShanFlyer.UIEffects
         {
             if (!node.gameObject.activeInHierarchy || node.TryGetComponent<CanvasDepthResetGraphic>(out _)) return;
             bool canvasBoundary = node != root && node.TryGetComponent<Canvas>(out var nested) && nested.isActiveAndEnabled;
+            // Our channel-only Canvas preserves draw order and must not split a
+            // contiguous mesh group merely because it has a separate vertex buffer.
+            if (canvasBoundary && node.TryGetComponent<UIEffectRenderer>(out var effect)
+                && effect.IsChannelIsolationCanvas(node.GetComponent<Canvas>())) canvasBoundary = false;
             bool maskBoundary = (node.TryGetComponent<Mask>(out var mask) && mask.isActiveAndEnabled)
                 || (node.TryGetComponent<RectMask2D>(out var rectMask) && rectMask.isActiveAndEnabled);
             bool boundary = canvasBoundary || maskBoundary;

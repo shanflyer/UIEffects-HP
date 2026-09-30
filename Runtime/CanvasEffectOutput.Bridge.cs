@@ -41,10 +41,12 @@ namespace ShanFlyer.UIEffects
         }
         private Texture BridgeTexture => _bridgeSource is SpriteRenderer sprite && sprite.sprite
             ? ShanFlyer.UIEffects.Internal.SpriteTexture.Resolve(sprite.sprite) : MaterialTexture.Resolve(material);
-        // Local geometry scales around its own Transform, without scaling placement.
+        // Sprite and local line geometry scale around their own placement.
+        // Mesh parts must share the effect frame: scaling vertices around separate
+        // renderer pivots without scaling their offsets tears assembled models apart.
         // World-space paths retain a common effect frame; moving their Transform must
         // not drag recorded points or make a trail rotate around its live head.
-        private Vector3 BridgeScaleOrigin => _bridgeSource is TrailRenderer
+        private Vector3 BridgeScaleOrigin => IsMeshSource(_bridgeSource) || _bridgeSource is TrailRenderer
             || (_bridgeSource is LineRenderer line && line.useWorldSpace)
                 ? _parent.transform.position : _bridgeSource.transform.position;
         private CombineInstance[] _bridgeCombine;
@@ -201,6 +203,12 @@ namespace ShanFlyer.UIEffects
             var origin = BridgeScaleOrigin;
             var matrix = transform.worldToLocalMatrix * Matrix4x4.Translate(origin)
                 * Matrix4x4.Scale(scale) * Matrix4x4.Translate(-origin);
+            if (IsMeshSource(_bridgeSource))
+            {
+                var frame = _parent.transform;
+                matrix = transform.worldToLocalMatrix * frame.localToWorldMatrix
+                    * Matrix4x4.Scale(scale) * frame.worldToLocalMatrix;
+            }
             Mesh input;
             if (_bridgeSource is MeshRenderer)
             {
@@ -310,14 +318,20 @@ namespace ShanFlyer.UIEffects
         }
         private void UpdateBridgeMaterial()
         {
+            if (isDepthMesh) _parent.EnsureMeshCanvasChannels();
+            var submitted = materialForRendering;
+            Material sourceMaterial = null;
             // Material animation is independent from geometry reuse, including MPB removal.
-            if ((_parent.hasMaterialPropertyBindings || isDepthMesh) && materialForRendering)
-                materialForRendering.CopyPropertiesFromMaterial(base.GetModifiedMaterial(material));
+            if ((_parent.hasMaterialPropertyBindings || isDepthMesh) && submitted)
+            {
+                sourceMaterial = base.GetModifiedMaterial(material);
+                if (sourceMaterial)
+                {
+                    CanvasMaterialBinding.CopyToCanvas(submitted, sourceMaterial, isDepthMesh);
+                }
+            }
             UpdateMaterialProperties();
             _spriteMask?.ApplyStencilState(materialForRendering);
-            // CopyPropertiesFromMaterial also copies renderQueue. Restore only the
-            // submission copy's UI queue after source/MPB refresh; never edit the asset.
-            if (isDepthMesh) CanvasMaterialBinding.ApplyMeshQueue(materialForRendering);
             var texture = _bridgeSource is SpriteRenderer ? mainTexture : MaterialTexture.Resolve(materialForRendering);
             SetCanvasRendererMaterials(canvasRenderer);
             if (_bridgeSubmittedTexture != texture)

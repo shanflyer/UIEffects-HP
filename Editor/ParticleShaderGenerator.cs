@@ -33,7 +33,7 @@ namespace ShanFlyer.UIEffects
             using (new EditorGUI.DisabledScope(busy))
             {
                 target = (Target)EditorGUILayout.Popup("Target", (int)target, new[] { "Built-in", "URP" });
-                EditorGUILayout.HelpBox("Generate stencil-enabled copies of all default particle shaders for the selected pipeline. Source shaders and project settings stay unchanged.", MessageType.Info);
+                EditorGUILayout.HelpBox("Generate stencil-enabled copies of all default particle shaders for the selected pipeline, without Unity scene fog. Source shaders and project settings stay unchanged.", MessageType.Info);
                 EditorGUILayout.LabelField("Output", OutputRoot, EditorStyles.wordWrappedLabel);
                 if (GUILayout.Button(busy ? "Generating..." : "Generate Shaders")) GenerateSelected();
             }
@@ -264,6 +264,7 @@ namespace ShanFlyer.UIEffects
                 if (files.ContainsKey(filename)) throw new InvalidOperationException("Shader filename collision: " + name);
                 string source = File.ReadAllText(catalog[name]);
                 string rewritten = ParticleShaderStencilPatcher.Rewrite(source, names[name], names);
+                rewritten = ParticleShaderStencilPatcher.WithoutFog(rewritten);
                 rewritten = CopyLocalIncludes(rewritten, Path.GetDirectoryName(catalog[name]), sourceRoot, files, new HashSet<string>());
                 files.Add(filename, rewritten);
                 report.Append(name).Append(" -> ").Append(names[name]).Append('\n');

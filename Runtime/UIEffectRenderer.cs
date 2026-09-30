@@ -191,6 +191,7 @@ namespace ShanFlyer.UIEffects
             _renderers.Clear();
             _bakeView.Dispose();
             base.OnDestroy();
+            if (_generatedEffectCanvas) EngineObjects.Destroy(_generatedEffectCanvas);
         }
 
         /// <summary>

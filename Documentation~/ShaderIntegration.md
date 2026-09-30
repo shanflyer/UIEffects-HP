@@ -8,19 +8,34 @@ Rendering through Canvas does not automatically make a material support UI masks
 | UGUI `Mask`, including nested masks | The stencil properties and render state shown below, plus `_ColorMask`. Keep **UGUI maskable** enabled on the effect. |
 | `RectMask2D` | `UNITY_UI_CLIP_RECT`, `_ClipRect` and fragment coverage/clipping. Soft edges additionally use `_UIMaskSoftnessX/Y`. |
 | Vertex tint and `CanvasGroup` fading | Consume the UI vertex color and alpha, with a blend mode that respects the resulting alpha. |
-| Particle/Sprite `SpriteMask` bridge | The stencil contract below; generated shaders are recognized automatically. Other custom shaders must be registered with `UIEffectSpriteMask`. |
+| Particle/Sprite `SpriteMask` bridge | The stencil contract below; stencil-enabled particle shader copies are recognized automatically. Other custom shaders must be registered with `UIEffectSpriteMask`. |
 
-UI Effects HP does not convert arbitrary source shaders. Each material slot, including a particle's Trail material, must support the UI features it uses. Native lighting and Renderer-specific shader inputs are not automatically reproduced by adding stencil support.
+Canvas submission does not add missing shader features. Each material slot, including a particle's Trail material, must support the UI features it uses. Native lighting and Renderer-specific shader inputs are not automatically reproduced by adding stencil support.
 
 ## Mesh depth and Canvas support
 
 Stencil is not required for an unmasked mesh. Ordinary materials can draw through Canvas, including textureless materials. Keep the source mesh material's depth test, depth writes, face culling and blending: disabling depth writes can break self-occlusion and occlusion between submeshes. Transparent materials retain their existing transparency/sorting limitations.
 
-The mesh submission uses a material copy with render queue 3000. Scene-view rendering emits UI as camera geometry; retaining a mesh's opaque queue can separate it from the UI depth-reset draws and expose it to the opaque/depth-priming path. Selecting the UI queue does not change the material's surface type, blend mode, depth state, culling or shader keywords. Source assets keep their original queue. The queue is reapplied after material-property synchronization. Mesh bounds retain their complete 3D volume; clipping rectangles are calculated from that volume instead of flattening the mesh bounds. Depth-reset bounds include their mesh group's volume as well as the Canvas plane.
+Mesh submission copies use the UI render queue (3000). This runtime-only change keeps meshes, depth resets and ordinary UI in the same queue so that Camera rendering can respect Canvas order. Source material assets retain their original queues; depth tests, depth writes, culling, blending and surface properties are preserved. Mesh bounds retain their complete 3D volume; clipping rectangles are calculated from that volume instead of flattening it. Depth-reset bounds include the mesh group's volume and the Canvas plane.
 
-Consecutive mesh and skinned-mesh outputs form an automatic depth group. Depth-only helper draws reset depth before the first and after the last output, without changing color or stencil. Within the group, depth-writing surfaces occlude one another by geometry depth. Between groups and ordinary UI, Canvas draw order applies. Other effect types, nested Canvas and active Mask/RectMask2D boundaries separate groups; no numeric group setting is exposed. These helpers use a dedicated shader and do not modify source shaders or materials. They bypass RectMask2D and keep all stencil bits; the visible mesh itself still needs the normal masking contract.
+Consecutive mesh and skinned-mesh outputs form an automatic depth group. Depth-only helper draws reset depth before the first and after the last output, without changing color or stencil. Within the group, depth-writing surfaces occlude one another by geometry depth. Between groups and ordinary UI, Canvas draw order applies. Other effect types, authored nested Canvas and active Mask/RectMask2D boundaries separate groups; the automatically added channel-isolation Canvas preserves consecutive mesh groups; no numeric group setting is exposed. These helpers use a dedicated shader and do not modify source shaders or materials. They bypass RectMask2D and keep all stencil bits; the visible mesh itself still needs the normal masking contract.
 
 Supported canvases are Screen Space - Overlay and Screen Space - Camera with an assigned, dedicated UI camera. Start the UI camera with cleared depth, render it after the scene, and do not require its discarded depth in subsequent passes/cameras. Shared scene/UI cameras and scene-depth preservation are outside this contract. World Space bypasses the bridge and restores native sources. Game and Scene views still use their own projections and lighting; this feature does not reproduce missing Renderer-specific shader inputs.
+
+## Materials and lighting
+
+Assign materials directly to the source Renderers. There is no material, shader or prefab conversion step. Canvas uses the assigned shader without automatic substitution or pass rewriting. Mesh submission only changes the render queue on a temporary material copy, as described above. Source material properties and shader assets remain unchanged.
+
+| Canvas mode | Lighting setup |
+| --- | --- |
+| Screen Space - Overlay | Use Unlit or custom UI lighting. Standard Lit is not supported by this package in Overlay. Custom lighting must account for the UI coordinate and projection setup. |
+| Screen Space - Camera | Lit is supported. Enable **Additional Shader Channels = Everything**: TexCoord1, TexCoord2, TexCoord3, Normal and Tangent. Mesh outputs enable these channels automatically only on the local nested Canvas attached to UIEffectRenderer; parent/root Canvas channels stay unchanged. |
+
+Place UIEffectRenderer below the root Canvas. It adds a local Canvas with **Override Sorting** disabled, preserving parent masking and hierarchy order. An existing local Canvas is reused without changing its sorting settings. Extra channels increase vertex data size; local isolation avoids widening unrelated UI vertex buffers, but separate canvases can increase draw calls by preventing cross-Canvas batching. Existing parent channel settings are preserved, not automatically reduced. Removing UIEffectRenderer removes only the Canvas it generated.
+
+A simple custom shader may use fewer channels, but full channels are the supported default for Camera-mode meshes. Missing channels can produce incorrect lighting. Canvas channels carry mesh attributes; they do not create missing mesh data or guarantee every Renderer-specific lighting feature for every custom shader.
+
+In the reported Unity 6.6 / URP / Direct3D 12 setup, selecting a UI mesh draw using Unity's default URP/Lit shader in Frame Debugger crashes the Editor. The cause is unresolved; shader-specific behavior is a hypothesis, not a confirmed diagnosis. Custom lighting shaders still need separate verification. This issue does not establish that every shader pass is executed.
 
 ## Generate Unity particle shaders
 
@@ -28,7 +43,7 @@ Open **Project Settings → UI Effects HP → Generate Particle Shaders...**, or
 
 The generator obtains Unity's shader source automatically, adds stencil properties and render state, and writes copies to `Assets/UIEffectsGenerated/ParticleShaders`. Built-in source matches the editor version; URP source comes from the installed package, the editor's bundled package, or Unity's Graphics repository branch for the editor release (2022.3 uses URP 14; Unity 6 uses URP 17). Repeated generation creates a new folder. The source shaders, materials, packages and pipeline settings are unchanged.
 
-Assign the generated shaders to your own materials. Their original shading, vertex stream requirements, depth and blend settings remain in effect. This operation adds stencil support, not `RectMask2D` clipping or replacement lighting. URP copies still require the corresponding URP package to compile and render; files are generated even when that dependency is absent. Each output includes the Unity source license and generation report.
+Assign the generated shaders to your own materials. Their original vertex stream requirements, depth and blend settings remain in effect, with Unity scene fog disabled. This operation adds stencil support, not `RectMask2D` clipping or replacement lighting. URP copies still require the corresponding URP package to compile and render; files are generated even when that dependency is absent. Each output includes the Unity source license and generation report.
 
 ## Working example
 

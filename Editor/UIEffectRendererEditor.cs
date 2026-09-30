@@ -55,6 +55,11 @@ namespace ShanFlyer.UIEffects
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Renderer sources", EditorStyles.boldLabel);
             Draw("m_RenderMeshes", "Include meshes"); Draw("m_RenderSkinnedMeshes", "Include skinned meshes");
+            EditorGUILayout.HelpBox("Overlay: use Unlit or custom UI lighting. Camera: Lit is supported. An effect-local nested Canvas isolates mesh vertex channels from other UI; Camera meshes enable all Additional Shader Channels there. Parent Canvas settings stay unchanged. Materials and shaders do not need conversion.", MessageType.Info);
+            if (targets.Length == 1 && ((UIEffectRenderer)target).canvas
+                && ((UIEffectRenderer)target).canvas.isRootCanvas
+                && ((UIEffectRenderer)target).canvas.transform == ((UIEffectRenderer)target).transform)
+                EditorGUILayout.HelpBox("Place UIEffectRenderer on a child of the root Canvas to isolate vertex channels. Root Canvas channels are not changed automatically.", MessageType.Warning);
             EditorGUILayout.HelpBox("Consecutive mesh and skinned-mesh outputs share depth automatically. Ordinary UI, other effect types, Canvas and mask boundaries end a group. Depth resets before and after each group preserve color and stencil. Keep the mesh material's depth test/write settings; depth-writing surfaces occlude each other within the group, regardless of sibling order. No group ID is required.", MessageType.Info);
             Draw("m_RenderSprites", "Include sprites"); Draw("m_RenderLines", "Include lines and trails");
             Draw("particleSources", "Particle sources");

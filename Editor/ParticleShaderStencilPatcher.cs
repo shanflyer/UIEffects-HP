@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ShanFlyer.UIEffects
 {
-    // Changes ShaderLab state only. Program bodies, comments and includes are preserved.
+    // Particle stencil support and explicit scene-fog removal.
     public static class ParticleShaderStencilPatcher
     {
         private sealed class Token
@@ -170,7 +170,61 @@ namespace ShanFlyer.UIEffects
                 if (Is(tokens[i], "}") && tokens[i].depth == tokens[open].depth) return i;
             throw new InvalidOperationException("Unclosed ShaderLab block.");
         }
-        private static List<Token> Scan(string source)
+        internal static string PrefixPrograms(string source, string prefix)
+        {
+            var tokens = Scan(source, true);
+            var result = new StringBuilder(source);
+            for (int i = tokens.Count - 1; i >= 0; --i)
+                if (!tokens[i].quoted && (tokens[i].value == "CGPROGRAM" || tokens[i].value == "CGINCLUDE"
+                    || tokens[i].value == "HLSLPROGRAM" || tokens[i].value == "HLSLINCLUDE"))
+                    result.Insert(tokens[i].end, "\n" + prefix + "\n");
+            return result.ToString();
+        }
+
+        internal static string WithoutFog(string source)
+        {
+            var tokens = Scan(source, true);
+            var edits = new List<Edit>();
+            for (int i = 0; i + 1 < tokens.Count; ++i)
+            {
+                if (Is(tokens[i], "Fog") && Is(tokens[i + 1], "{"))
+                    edits.Add(new Edit(tokens[i].start, tokens[Close(tokens, i + 1)].end, "Fog { Mode Off }"));
+                if (!Is(tokens[i], "SubShader") || !Is(tokens[i + 1], "{")) continue;
+                int close = Close(tokens, i + 1);
+                bool program = false, fogState = false;
+                for (int j = i + 2; j < close; ++j)
+                {
+                    program |= Is(tokens[j], "CGPROGRAM") || Is(tokens[j], "HLSLPROGRAM") || Is(tokens[j], "GLSLPROGRAM");
+                    fogState |= Is(tokens[j], "Fog") && tokens[j].depth == tokens[i + 1].depth + 1;
+                }
+                if (!program && !fogState)
+                    edits.Add(new Edit(tokens[i + 1].end, tokens[i + 1].end, "\nFog { Mode Off }\n"));
+            }
+            var rewritten = new StringBuilder(source);
+            foreach (var edit in edits.OrderByDescending(edit => edit.start))
+                rewritten.Remove(edit.start, edit.end - edit.start).Insert(edit.start, edit.text);
+            source = rewritten.ToString();
+            // Unity 2022/URP 14 uses multi_compile_fog; newer URP releases import
+            // Fog.hlsl with pragmas and can declare fog as dynamic keywords.
+            source = Regex.Replace(source, @"(?m)^[ \t]*#[ \t]*pragma[ \t]+multi_compile_fog\b[^\r\n]*", "");
+            source = Regex.Replace(source,
+                "(?m)^[ \\t]*#[ \\t]*include(?:_with_pragmas)?[ \\t]+\"Packages/com\\.unity\\.render-pipelines\\.universal/ShaderLibrary/Fog\\.hlsl\"[^\\r\\n]*", "");
+            source = Regex.Replace(source,
+                @"(?m)^([ \t]*#[ \t]*pragma[ \t]+(?:multi_compile\w*|shader_feature\w*|dynamic_branch\w*)[ \t]+)([^\r\n]+)", match =>
+                {
+                    var body = match.Groups[2].Value;
+                    if (!Regex.IsMatch(body, @"\bFOG_(?:LINEAR|EXP|EXP2)\b")) return match.Value;
+                    int comment = body.IndexOf("//", StringComparison.Ordinal);
+                    if (comment >= 0) body = body.Substring(0, comment);
+                    var kept = Regex.Split(body.Trim(), @"\s+").Where(token =>
+                        token != "FOG_LINEAR" && token != "FOG_EXP" && token != "FOG_EXP2").ToArray();
+                    return kept.Any(token => token != "_" && token != "__")
+                        ? match.Groups[1].Value + string.Join(" ", kept) : "";
+                });
+            return PrefixPrograms(source, "#include \"Packages/com.shanflyer.ui-effects/Shaders/CanvasNoFog.cginc\"");
+        }
+
+        private static List<Token> Scan(string source, bool includePrograms = false)
         {
             var result = new List<Token>(); int depth = 0;
             for (int p = 0; p < source.Length;)
@@ -198,6 +252,7 @@ namespace ShanFlyer.UIEffects
                 string value = source.Substring(start + (quoted ? 1 : 0), p - start - (quoted ? 2 : 0));
                 if (!quoted && (value == "CGPROGRAM" || value == "CGINCLUDE" || value == "HLSLPROGRAM" || value == "HLSLINCLUDE" || value == "GLSLPROGRAM"))
                 {
+                    if (includePrograms) result.Add(new Token { value = value, start = start, end = p, depth = depth });
                     string endWord = value.StartsWith("CG", StringComparison.Ordinal) ? "ENDCG" : value.StartsWith("HLSL", StringComparison.Ordinal) ? "ENDHLSL" : "ENDGLSL";
                     var end = Regex.Match(source.Substring(p), @"(?m)^\s*" + endWord + @"\b");
                     if (!end.Success) throw new InvalidOperationException("Unclosed shader program.");
