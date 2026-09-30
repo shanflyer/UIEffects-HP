@@ -1,6 +1,6 @@
 # UI Effects HP
 
-A UGUI effects package for **Unity 2022.3 LTS and Unity 6**. Package version: **1.0.0**.
+A UGUI effects package for **Unity 2022.3 LTS and Unity 6**. Package version: **1.0.1**.
 
 ## Features
 
@@ -18,10 +18,10 @@ Requires Unity 2022.3 or later. Use UGUI 1.0 with Unity 2022.3 and UGUI 2.0 with
 This repository is the UPM package itself. In **Package Manager > Install package from Git URL**, enter:
 
 ```text
-https://github.com/shanflyer/UIEffects-HP.git#v1.0.0
+https://github.com/shanflyer/UIEffects-HP.git#v1.0.1
 ```
 
-Alternatively, extract the [release package](https://github.com/shanflyer/UIEffects-HP/releases/tag/v1.0.0), then select its root `package.json` using **Install package from disk**, or copy the extracted `com.shanflyer.ui-effects` folder into your project's `Packages` directory. Create a separate Unity project to use or test the package.
+Alternatively, extract the [release package](https://github.com/shanflyer/UIEffects-HP/releases/tag/v1.0.1), then select its root `package.json` using **Install package from disk**, or copy the extracted `com.shanflyer.ui-effects` folder into your project's `Packages` directory. Create a separate Unity project to use or test the package.
 
 ## Usage
 
