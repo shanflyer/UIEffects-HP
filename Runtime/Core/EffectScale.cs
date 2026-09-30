@@ -18,15 +18,22 @@ namespace ShanFlyer.UIEffects
             result.m03 = offset.x; result.m13 = offset.y; result.m23 = offset.z;
             return result;
         }
-        // Bounds are projected from the local XY plane, matching MaskableGraphic clipping.
+        internal static Bounds TransformBounds(Bounds bounds, Matrix4x4 matrix)
+        {
+            var e = bounds.extents;
+            var extent = new Vector3(
+                Mathf.Abs(matrix.m00) * e.x + Mathf.Abs(matrix.m01) * e.y + Mathf.Abs(matrix.m02) * e.z,
+                Mathf.Abs(matrix.m10) * e.x + Mathf.Abs(matrix.m11) * e.y + Mathf.Abs(matrix.m12) * e.z,
+                Mathf.Abs(matrix.m20) * e.x + Mathf.Abs(matrix.m21) * e.y + Mathf.Abs(matrix.m22) * e.z);
+            return new Bounds(matrix.MultiplyPoint3x4(bounds.center), extent * 2);
+        }
+
+        // Project the transformed 3D bounds onto the Canvas plane. Discarding local
+        // Z first loses visible geometry when an output is rotated in the Scene view.
         internal static Rect TransformRect(Bounds bounds, Matrix4x4 matrix)
         {
-            var center = bounds.center; center.z = 0;
-            center = matrix.MultiplyPoint3x4(center);
-            var extents = bounds.extents;
-            float x = Mathf.Abs(matrix.m00) * extents.x + Mathf.Abs(matrix.m01) * extents.y;
-            float y = Mathf.Abs(matrix.m10) * extents.x + Mathf.Abs(matrix.m11) * extents.y;
-            return new Rect(center.x - x, center.y - y, 2 * x, 2 * y);
+            var projected = TransformBounds(bounds, matrix);
+            return new Rect(projected.min.x, projected.min.y, projected.size.x, projected.size.y);
         }
         private static float ReciprocalAxis(float value)
         {

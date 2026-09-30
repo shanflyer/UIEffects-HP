@@ -10,16 +10,26 @@ namespace ShanFlyer.UIEffects
         internal readonly ParticleSystem source;
         internal readonly ParticleSystemRenderer renderer;
         private readonly bool wasEnabled;
+        private bool nativePlaybackRequested;
+        private bool restorePlayback;
         private int users;
         private UnityEngine.Rendering.UVChannelFlags authoredChannels, appliedChannels;
         private bool ownsChannels;
         internal readonly ParticleSimulation simulation = new ParticleSimulation();
+        internal ParticleMergeSample bodySample, trailSample;
+
+        internal static ParticleSourceBinding Find(ParticleSystem source)
+        {
+            return source && source.TryGetComponent<ParticleSystemRenderer>(out var renderer)
+                && active.TryGetValue(renderer, out var binding) ? binding : null;
+        }
 
         private ParticleSourceBinding(ParticleSystem source, ParticleSystemRenderer renderer)
         {
             this.source = source;
             this.renderer = renderer;
             wasEnabled = renderer.enabled;
+            nativePlaybackRequested = source.isPlaying;
             if (Application.isPlaying && source.isPlaying) source.Pause(false);
             EnsureVertexContract();
         }
@@ -51,8 +61,9 @@ namespace ShanFlyer.UIEffects
             renderer.enabled = false;
             return state;
         }
-        internal void Release()
+        internal void Release(bool restoreNativePlayback = false)
         {
+            restorePlayback |= restoreNativePlayback;
             if (--users != 0) return;
             active.Remove(renderer);
             if (source && ownsChannels)
@@ -62,6 +73,18 @@ namespace ShanFlyer.UIEffects
             }
             ownsChannels = false;
             if (renderer) renderer.enabled = wasEnabled;
+            // Switching to an unsupported Canvas returns control to the native system.
+            // Resume an adopted running source without restarting its particle history.
+            if (restorePlayback && nativePlaybackRequested && Application.isPlaying && source && source.isPaused)
+                source.Play(false);
+        }
+
+        internal static void TrackPlaybackCommand(ParticleSystem source, ParticleCommand command)
+        {
+            if (!source || !source.TryGetComponent<ParticleSystemRenderer>(out var renderer)
+                || !active.TryGetValue(renderer, out var binding)) return;
+            if (command == ParticleCommand.Restart || command == ParticleCommand.Resume) binding.nativePlaybackRequested = true;
+            else if (command == ParticleCommand.Pause || command == ParticleCommand.Stop) binding.nativePlaybackRequested = false;
         }
     }
 }

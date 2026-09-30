@@ -72,7 +72,7 @@ namespace ShanFlyer.UIEffects
         {
             if (!s_Owners.TryGetValue(particle, out var owner)) return;
             s_Desired.Clear();
-            if (particle.isActiveAndEnabled && particle.canvas)
+            if (particle.isActiveAndEnabled && particle.supportsCanvasRendering)
             {
                 // Take over every source mask in this effect, including masks not currently in
                 // any particle's sorting range. Unused native masks can leak into UI as well.

@@ -41,6 +41,12 @@ namespace ShanFlyer.UIEffects
 
         public void Reset() { this = default; }
 
+        internal void TakePending(out float scaled, out float unscaled)
+        {
+            scaled = _scaled; unscaled = _unscaled;
+            _scaled = _unscaled = 0;
+        }
+
         public void AdvanceEveryFrame(float scaled, float unscaled,
             out float scaledStep, out float unscaledStep)
         {

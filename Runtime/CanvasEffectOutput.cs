@@ -64,7 +64,7 @@ namespace ShanFlyer.UIEffects
         private bool _materialsDirty = true;
         private Material _submittedMaterial;
         private int _lastBakeFrame = -1;
-        // Merged mode: one renderer binds all non-trail ParticleSystems of the same UIEffectRenderer.
+        // One merged output owns a consecutive compatible run in the source draw order.
         private ParticleSystem[] _mergedSystems;
         private ParticleSystemRenderer[] _mergedPsRenderers;
         private ParticleSourceBinding[] _sourceBindings;
@@ -79,6 +79,32 @@ namespace ShanFlyer.UIEffects
         private CombineInstance[] _mergedCombines;
         private bool _mergedUniform;
         internal bool isMerged => _mergedSystems != null;
+
+        internal bool ContainsMergedRun(List<ParticleSystem> sources)
+        {
+            if (_mergedSystems == null || sources.Count > _mergedSystems.Length) return false;
+            for (int i = 0; i < sources.Count; ++i)
+                if (_mergedSystems[i] != sources[i]) return false;
+            return true;
+        }
+
+        internal void PreservePendingSimulation()
+        {
+            if (!_parent || _parent.isPaused || isBridge || _isTrail) return;
+            _bakeClock.TakePending(out var scaled, out var unscaled);
+            if (_sourceBindings != null)
+            {
+                for (int i = 0; i < _sourceBindings.Length; ++i)
+                    if (!_mergedMainEmitters[i]) Carry(_sourceBindings[i], scaled, unscaled);
+            }
+            else if (!_mainEmitter) Carry(_sourceBinding, scaled, unscaled);
+        }
+
+        private void Carry(ParticleSourceBinding binding, float scaled, float unscaled)
+        {
+            if (binding != null && binding.source)
+                binding.simulation.Carry(binding.source.main.useUnscaledTime ? unscaled : scaled, _parent.playbackCycle);
+        }
         // [FxUIEffects 刀5] Early Culling:UGUI Cull 回调缓存的几何裁剪结论(不含 bounds-empty,避免首帧被永久跳过烘焙)。
         private bool _uguiClipCulled;
         private float _nextCullProbeTime;
@@ -173,7 +199,7 @@ namespace ShanFlyer.UIEffects
             InvalidateMeshCache(); SetMaterialDirty();
         }
 
-        public void Reset(int index = -1)
+        public void Reset(int index = -1, bool restoreNativePlayback = false)
         {
             // Retire UI submission before returning source leases. Rebinding starts from
             // the same state whether this component was active, pooled or externally disabled.
@@ -184,7 +210,7 @@ namespace ShanFlyer.UIEffects
             InvalidateResolvedMaterial();
             ReleaseBridge();
             ReleaseSpriteMask();
-            ReleaseParticleBindings();
+            ReleaseParticleBindings(restoreNativePlayback);
             _parent = null;
             _boundMaterial = null;
             _boundTexture = null;
@@ -203,12 +229,12 @@ namespace ShanFlyer.UIEffects
             if (index >= 0) _index = index;
         }
 
-        private void ReleaseParticleBindings()
+        private void ReleaseParticleBindings(bool restoreNativePlayback = false)
         {
-            _sourceBinding?.Release();
+            _sourceBinding?.Release(restoreNativePlayback);
             _sourceBinding = null;
             if (_sourceBindings != null)
-                foreach (var binding in _sourceBindings) binding?.Release();
+                foreach (var binding in _sourceBindings) binding?.Release(restoreNativePlayback);
             _sourceBindings = null;
             _particleSystem = null;
             _renderer = null;
@@ -406,7 +432,7 @@ namespace ShanFlyer.UIEffects
             return true;
         }
 
-        internal static bool CanMerge(List<ParticleSystem> systems)
+        internal static bool CanMerge(IReadOnlyList<ParticleSystem> systems)
         {
             Material firstMaterial = null;
             Texture firstTexture = null;
@@ -456,7 +482,7 @@ namespace ShanFlyer.UIEffects
                     return _boundTrails != _particleSystem.trails.enabled
                            || _boundMaterial != (_isTrail ? _renderer.trailMaterial : _renderer.sharedMaterial)
                            || _boundTexture != mainTexture;
-                if (_parent.hasMaterialPropertyBindings) return true;
+                if (_parent.hasMaterialPropertyBindings || !CanMerge(_mergedSystems)) return true;
                 Texture boundSprite = null;
                 var foundBoundSystem = false;
                 Material lastMaterial = null;
@@ -526,6 +552,7 @@ namespace ShanFlyer.UIEffects
 
         protected override void OnDisable()
         {
+            ReleaseDepthBoundaries();
             ReleaseSpriteMask();
             base.OnDisable();
 
@@ -553,7 +580,7 @@ namespace ShanFlyer.UIEffects
             if (!_parent || !IsActive()) { _materialBinding.Dispose(); return baseMaterial; }
             var stencilBase = base.GetModifiedMaterial(baseMaterial);
             var resolved = _materialBinding.Resolve(stencilBase, mainTexture,
-                _parent.hasMaterialPropertyBindings ? this : null);
+                _parent.hasMaterialPropertyBindings ? this : null, isDepthMesh);
             return _spriteMask == null ? resolved : _spriteMask.Modify(resolved);
         }
 
@@ -746,6 +773,7 @@ namespace ShanFlyer.UIEffects
                     Mesh destination = direct ? particleMesh : IntermediateBakeMesh();
                     ParticleGeometry.Capture(_particleSystem, _renderer, _isTrail, view, destination);
                     ValidateCapturedMesh(destination);
+                    RecordMergeSample(_sourceBinding, _isTrail, destination, mapping);
                     if (!direct) _singleCombine[0] = new CombineInstance { mesh = destination, transform = mapping };
                     else UIEffectProfiler.current.directBakeOps++;
                 }
@@ -824,6 +852,16 @@ namespace ShanFlyer.UIEffects
             ParticleGeometry.Capture(binding.source, binding.renderer, trail, view, mesh);
             ValidateCapturedMesh(mesh);
             _mergedCombines[slot].transform = OutputMapping(binding.source, trail, worldToOutput);
+            RecordMergeSample(binding, trail, mesh, _mergedCombines[slot].transform);
+        }
+
+        private void RecordMergeSample(ParticleSourceBinding binding, bool trail, Mesh mesh, Matrix4x4 mapping)
+        {
+            if (!_parent.mergeSamplingEnabled) return;
+            bool hidden = _parent.useMeshSharing
+                ? _parent.groupAllAlphaHidden || _parent.groupAllClipped : alphaHidden || clipHidden;
+            if (trail) binding.trailSample.Record(mesh, mapping, hidden);
+            else binding.bodySample.Record(mesh, mapping, hidden);
         }
 
         private bool ComposeGeometry(bool merged, bool direct)

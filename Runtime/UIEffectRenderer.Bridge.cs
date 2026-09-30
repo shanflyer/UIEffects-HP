@@ -13,8 +13,8 @@ namespace ShanFlyer.UIEffects
         private bool m_RenderSprites = true;
         [SerializeField, Tooltip("Render owned single-material TrailRenderers and LineRenderers through this Canvas.")]
         private bool m_RenderLines = true;
-        [SerializeField, Tooltip("Order all outputs by source sorting layer/order, then hierarchy. Disables particle merging to preserve interleaving.")]
-        private bool m_SortBySourceOrder;
+        [SerializeField, Tooltip("Order outputs within this component by Sorting Layer, Order in Layer, then source hierarchy. Consecutive compatible particles may merge when the runtime workload estimate is favourable. Consecutive meshes still use depth occlusion within their group.")]
+        private bool m_SortBySourceOrder = true;
         private bool _renderMeshesStamp, _renderLinesStamp, _sourceSortStamp, _renderSkinnedStamp, _renderSpritesStamp;
         private readonly List<Renderer> _bridgeSources = new List<Renderer>();
         private readonly Dictionary<Renderer, int> _sourceOrder = new Dictionary<Renderer, int>();
@@ -124,10 +124,30 @@ namespace ShanFlyer.UIEffects
         {
             var left = a.sourceRenderer; var right = b.sourceRenderer;
             if (!left || !right) return a.outputIndex.CompareTo(b.outputIndex);
-            var order = SpriteMaskResolver.Compare(left.sortingLayerID, left.sortingOrder, right.sortingLayerID, right.sortingOrder);
+            var order = CompareSourceRenderers(left, right);
+            return order != 0 ? order : a.outputIndex.CompareTo(b.outputIndex);
+        }
+
+        internal int CompareSourceRenderers(Renderer left, Renderer right)
+        {
+            if (!left || !right || left == right) return 0;
+            int order = SpriteMaskResolver.Compare(left.sortingLayerID, left.sortingOrder, right.sortingLayerID, right.sortingOrder);
             if (order != 0) return order;
-            _sourceOrder.TryGetValue(left, out var li); _sourceOrder.TryGetValue(right, out var ri);
-            return li != ri ? li.CompareTo(ri) : a.outputIndex.CompareTo(b.outputIndex);
+            // Compare current hierarchy without allocating paths or counting generated siblings.
+            var a = left.transform; var b = right.transform;
+            if (a == b) return 0;
+            if (!a.IsChildOf(transform) || !b.IsChildOf(transform))
+            {
+                _sourceOrder.TryGetValue(left, out var li); _sourceOrder.TryGetValue(right, out var ri);
+                return li.CompareTo(ri);
+            }
+            int da = 0, db = 0;
+            for (var t = a; t != transform; t = t.parent) ++da;
+            for (var t = b; t != transform; t = t.parent) ++db;
+            while (da > db) { a = a.parent; --da; if (a == b) return 1; }
+            while (db > da) { b = b.parent; --db; if (a == b) return -1; }
+            while (a.parent != b.parent) { a = a.parent; b = b.parent; }
+            return a.GetSiblingIndex().CompareTo(b.GetSiblingIndex());
         }
 
         private void PlanBridgeSources(EffectOutputPlan plan)

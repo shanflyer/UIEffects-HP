@@ -17,7 +17,7 @@ namespace ShanFlyer.UIEffects
         internal void Reset() { _hasPrevious = false; _rejected = 0; }
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 
-        internal Result Evaluate(List<Vector3> vertices, List<int> indices)
+        internal Result Evaluate(List<Vector3> vertices, List<int> indices, bool checkDiscontinuity = true)
         {
             if (vertices.Count == 0 || indices.Count == 0) { Reset(); return Result.Empty; }
             if (vertices.Count < 3 || indices.Count < 3 || indices.Count % 3 != 0)
@@ -42,7 +42,7 @@ namespace ShanFlyer.UIEffects
             maxEdge = Mathf.Sqrt(maxEdge);
             if (!Finite(maxEdge) || !Finite(bounds.size.magnitude)) return Reject(Result.Corrupt);
             var reference = Mathf.Max(0.001f, Mathf.Max(_previousBounds.size.magnitude, bounds.size.magnitude));
-            if (_hasPrevious && _rejected < 3 &&
+            if (checkDiscontinuity && _hasPrevious && _rejected < 3 &&
                 ((bounds.center - _previousBounds.center).magnitude > reference * 3
                  || (bounds.size - _previousBounds.size).magnitude > reference * 3
                  || maxEdge > Mathf.Max(0.001f, _previousMaxEdge * 4)))

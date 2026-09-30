@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UI;
 
 namespace ShanFlyer.UIEffects.Internal
@@ -33,16 +34,24 @@ namespace ShanFlyer.UIEffects.Internal
         internal bool Finish(Mesh mesh, bool gamma, int limit, out Bounds bounds)
         {
             bounds = default;
-            if (gamma || modifiers.Count > 0) mesh.GetColors(colors);
+            // Model meshes commonly omit COLOR. UI shaders multiply by it, so the
+            // output must provide opaque white without changing the source asset.
+            bool missingColors = !mesh.HasVertexAttribute(VertexAttribute.Color);
+            if (missingColors)
+            {
+                colors.Clear();
+                for (int i = 0; i < mesh.vertexCount; ++i) colors.Add(new Color32(255, 255, 255, 255));
+            }
+            else if (gamma || modifiers.Count > 0) mesh.GetColors(colors);
             if (gamma)
             {
                 for (int i = 0; i < colors.Count; ++i)
                 {
                     var c = colors[i]; colors[i] = new Color32(Gamma[c.r], Gamma[c.g], Gamma[c.b], c.a);
                 }
-                // Modifiers consume this buffer directly, avoiding a SetColors/GetColors round trip.
-                if (modifiers.Count == 0) mesh.SetColors(colors);
             }
+            // Modifiers consume this buffer directly, avoiding a SetColors/GetColors round trip.
+            if (modifiers.Count == 0 && (gamma || missingColors)) mesh.SetColors(colors);
             if (modifiers.Count > 0)
             {
                 mesh.GetVertices(positions); mesh.GetNormals(normals); mesh.GetTangents(tangents);
@@ -64,9 +73,8 @@ namespace ShanFlyer.UIEffects.Internal
                 mesh.RecalculateBounds();
             }
             bounds = mesh.bounds;
-            var center = bounds.center; center.z = 0;
-            var size = bounds.size; size.z = 0;
-            bounds = new Bounds(center, size); mesh.bounds = bounds;
+            // Keep the actual 3D bounds for camera/Scene-view frustum culling.
+            // Project to a rectangle only when UGUI asks for clipping bounds.
             return true;
         }
         private static T At<T>(List<T> values, int index) => index < values.Count ? values[index] : default;

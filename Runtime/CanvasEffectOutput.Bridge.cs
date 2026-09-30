@@ -40,14 +40,13 @@ namespace ShanFlyer.UIEffects
             s_Materials.Clear(); return result;
         }
         private Texture BridgeTexture => _bridgeSource is SpriteRenderer sprite && sprite.sprite
-            ? ShanFlyer.UIEffects.Internal.SpriteTexture.Resolve(sprite.sprite) : material ? material.mainTexture : null;
+            ? ShanFlyer.UIEffects.Internal.SpriteTexture.Resolve(sprite.sprite) : MaterialTexture.Resolve(material);
         // Local geometry scales around its own Transform, without scaling placement.
         // World-space paths retain a common effect frame; moving their Transform must
         // not drag recorded points or make a trail rotate around its live head.
         private Vector3 BridgeScaleOrigin => _bridgeSource is TrailRenderer
             || (_bridgeSource is LineRenderer line && line.useWorldSpace)
                 ? _parent.transform.position : _bridgeSource.transform.position;
-        private int _lineRecoveryFrames;
         private CombineInstance[] _bridgeCombine;
         private List<Vector3> _lineVertices;
         private List<int> _lineIndices;
@@ -62,20 +61,29 @@ namespace ShanFlyer.UIEffects
 
         internal void InvalidateSpriteMaskGeometry() { _spriteMask?.InvalidateGeometry(); }
 
-        internal static bool CanBridge(Renderer source)
+        internal static bool CanBridge(Renderer source) => BridgeIssue(source) == null;
+
+        // Used by both binding and the Inspector, including sources rejected by binding.
+        internal static string BridgeIssue(Renderer source)
         {
-            if (!source) return false;
+            if (!source) return "Missing Renderer.";
             if (IsMeshSource(source))
             {
                 var mesh = SourceMesh(source);
-                if (!mesh || mesh.subMeshCount == 0 || (source is MeshRenderer && !mesh.isReadable)) return false;
-                for (int i = 0; i < mesh.subMeshCount; ++i) if (mesh.GetTopology(i) != MeshTopology.Triangles) return false;
+                if (!mesh) return "Assign a mesh to the MeshFilter or SkinnedMeshRenderer.";
+                if (mesh.subMeshCount == 0) return "The mesh has no submeshes.";
+                if (source is MeshRenderer && !mesh.isReadable) return "Enable Read/Write on the mesh's model import settings, then Apply.";
+                for (int i = 0; i < mesh.subMeshCount; ++i)
+                    if (mesh.GetTopology(i) != MeshTopology.Triangles) return "Only triangle submeshes can be rendered through Canvas.";
             }
-            else if (!(source is SpriteRenderer) && !(source is TrailRenderer) && !(source is LineRenderer)) return false;
+            else if (!(source is SpriteRenderer) && !(source is TrailRenderer) && !(source is LineRenderer)) return "Unsupported Renderer type.";
             source.GetSharedMaterials(s_Materials);
-            bool supported = s_Materials.Count > 0 && (IsMeshSource(source) || s_Materials.Count == 1);
-            foreach (var mat in s_Materials) supported &= mat;
-            s_Materials.Clear(); return supported;
+            string issue = null;
+            if (s_Materials.Count == 0) issue = "Assign a UI-compatible material.";
+            else if (!IsMeshSource(source) && s_Materials.Count != 1) issue = "This Renderer requires exactly one material.";
+            else foreach (var mat in s_Materials)
+                if (!mat) { issue = "Assign a UI-compatible material to every material slot."; break; }
+            s_Materials.Clear(); return issue;
         }
 
         internal void SetBridge(UIEffectRenderer parent, Renderer source, int materialSlot = 0)
@@ -126,7 +134,6 @@ namespace ShanFlyer.UIEffects
             _bridgeSnapshot = null;
             _bridgeClock.Reset();
             _lineValidator?.Reset();
-            _lineRecoveryFrames = 0;
         }
 
         private void DestroyBridgeMeshes()
@@ -159,7 +166,7 @@ namespace ShanFlyer.UIEffects
                 || !_bridgeSource.enabled || !_bridgeSource.gameObject.activeInHierarchy
                 || _originalForceRenderingOff || !_parent.canRender)
             { ClearBridgeOutput(); return; }
-            if (_lastBakeFrame == Time.frameCount) return;
+            if (Application.isPlaying && _lastBakeFrame == Time.frameCount) return;
             _lastBakeFrame = Time.frameCount;
             // A bridge is local to this consumer, so group visibility is irrelevant.
             if (!canvas.isActiveAndEnabled
@@ -184,6 +191,12 @@ namespace ShanFlyer.UIEffects
             if (UIEffectRenderer.updateRatePercent == 100) _bridgeClock.Reset();
             _forceBake = false;
             var scale = Vector3.Scale(_parent.calculatedScale, _parent.parentScale);
+            // World paths are recorded in actual scene/UI coordinates, including their
+            // width. Automatic conversion would apply Canvas units a second time and
+            // pull a trail away from its emitter. Only explicit zoom scales these paths.
+            bool worldPath = _bridgeSource is TrailRenderer || (_bridgeSource is LineRenderer worldLine && worldLine.useWorldSpace);
+            if (worldPath && _parent.unitConversion == UIEffectRenderer.UnitConversion.Automatic)
+                scale = _parent.renderScale;
             if (!EffectScale.HasVolume(scale)) { ClearBridgeOutput(); return; }
             var origin = BridgeScaleOrigin;
             var matrix = transform.worldToLocalMatrix * Matrix4x4.Translate(origin)
@@ -216,12 +229,6 @@ namespace ShanFlyer.UIEffects
                 var line = _bridgeSource as LineRenderer;
                 if ((trail && trail.positionCount < 2) || (line && line.positionCount < 2))
                 { ClearBridgeOutput(); return; }
-                if (trail && Application.isPlaying)
-                {
-                    if (Mathf.Max(Time.deltaTime, Time.unscaledDeltaTime) > 0.1f)
-                    { _lineRecoveryFrames = 3; return; }
-                    if (_lineRecoveryFrames > 0) { _lineRecoveryFrames--; return; }
-                }
                 if (!_lineScratch) _lineScratch = CreateBridgeMesh("UIEffectRenderer Line Scratch", IndexFormat.UInt32);
                 if (_lineValidator == null)
                 {
@@ -245,13 +252,16 @@ namespace ShanFlyer.UIEffects
                 _lineScratch.GetVertices(_lineVertices);
                 _lineIndices.Clear();
                 if (_lineScratch.subMeshCount > 0) _lineScratch.GetIndices(_lineIndices, 0);
-                var result = _lineValidator.Evaluate(_lineVertices, _lineIndices);
+                // Line endpoints can change arbitrarily each frame. Temporal outlier
+                // filtering is only meaningful for sampled trail history.
+                var result = _lineValidator.Evaluate(_lineVertices, _lineIndices, trail != null);
                 if (result == LineSnapshotValidator.Result.Empty) { ClearBridgeOutput(); return; }
                 if (result != LineSnapshotValidator.Result.Valid)
                 {
                     if (_lineValidator.expired)
                     {
                         ClearCanvas(); _meshCleared = true; _lastBounds = new Bounds();
+                        _bridgeGeometryValid = false; _bridgeSubmittedTexture = null;
                         // Keep rejection history: next finite snapshot may rebase.
                     }
                     return;
@@ -301,11 +311,14 @@ namespace ShanFlyer.UIEffects
         private void UpdateBridgeMaterial()
         {
             // Material animation is independent from geometry reuse, including MPB removal.
-            if (_parent.hasMaterialPropertyBindings && materialForRendering)
+            if ((_parent.hasMaterialPropertyBindings || isDepthMesh) && materialForRendering)
                 materialForRendering.CopyPropertiesFromMaterial(base.GetModifiedMaterial(material));
             UpdateMaterialProperties();
             _spriteMask?.ApplyStencilState(materialForRendering);
-            var texture = _bridgeSource is SpriteRenderer ? mainTexture : materialForRendering ? materialForRendering.mainTexture : mainTexture;
+            // CopyPropertiesFromMaterial also copies renderQueue. Restore only the
+            // submission copy's UI queue after source/MPB refresh; never edit the asset.
+            if (isDepthMesh) CanvasMaterialBinding.ApplyMeshQueue(materialForRendering);
+            var texture = _bridgeSource is SpriteRenderer ? mainTexture : MaterialTexture.Resolve(materialForRendering);
             SetCanvasRendererMaterials(canvasRenderer);
             if (_bridgeSubmittedTexture != texture)
             {

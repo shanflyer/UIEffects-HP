@@ -11,6 +11,68 @@ namespace ShanFlyer.UIEffects.Editor.Tests
     public class HPBridgeRuntimeTests
     {
         [UnityEngine.TestTools.UnityTest]
+        public System.Collections.IEnumerator TrailStillUpdatesDuringLongFrames()
+        {
+            yield return new UnityEngine.TestTools.EnterPlayMode();
+            var oldCapture = Time.captureDeltaTime;
+            var oldRate = UIEffectRenderer.updateRatePercent;
+            var oldCull = UIEffectRenderer.earlyCull;
+            var root = new GameObject("Slow trail canvas", typeof(Canvas));
+            var view = new GameObject("Slow trail camera", typeof(Camera));
+            var material = new Material(Shader.Find("UI/Default"));
+            try
+            {
+                Time.captureDeltaTime = .2f;
+                UIEffectRenderer.updateRatePercent = 100; UIEffectRenderer.earlyCull = 0;
+                var canvas = root.GetComponent<Canvas>(); canvas.renderMode = RenderMode.WorldSpace;
+                var camera = view.GetComponent<Camera>(); camera.enabled = false; camera.orthographic = true;
+                camera.transform.position = new Vector3(0, 0, -10); canvas.worldCamera = camera;
+                var host = new GameObject("Effect", typeof(RectTransform)); host.transform.SetParent(root.transform, false);
+                var effect = host.AddComponent<UIEffectRenderer>();
+                effect.unitConversion = UIEffectRenderer.UnitConversion.Automatic; effect.uniformScale = 1;
+                var node = new GameObject("Trail", typeof(TrailRenderer)); node.transform.SetParent(host.transform, false);
+                var trail = node.GetComponent<TrailRenderer>(); trail.sharedMaterial = material;
+                var stamp = typeof(CanvasEffectOutput).GetField("_lastBakeFrame", BindingFlags.Instance | BindingFlags.NonPublic);
+                trail.time = 10; trail.widthCurve = AnimationCurve.Constant(0, 1, .2f);
+                foreach (var mode in new[] { RenderMode.WorldSpace, RenderMode.ScreenSpaceOverlay, RenderMode.ScreenSpaceCamera })
+                {
+                    trail.emitting = false; trail.Clear();
+                    canvas.renderMode = mode; canvas.worldCamera = camera; canvas.planeDistance = 10;
+                    Canvas.ForceUpdateCanvases(); effect.PrepareForUpdate();
+                    yield return null; // Allow the Canvas plane and normalization to settle before recording.
+                    trail.transform.position = effect.transform.position;
+                    trail.Clear(); trail.emitting = true;
+                    effect.RefreshSources();
+                    yield return null;
+                    var step = canvas.transform.TransformVector(Vector3.right * (mode == RenderMode.WorldSpace ? 1 : 20));
+                    trail.transform.position += step;
+                    yield return null;
+                    trail.transform.position += step;
+                    yield return null;
+                    Assert.Greater(Time.deltaTime, .1f, "Regression requires an actual long simulation frame.");
+                    effect.PrepareForUpdate();
+                    var output = effect.GetRendererIfExists(0);
+                    stamp.SetValue(output, -1); output.UpdateMesh(camera);
+                    Assert.Greater(output.canvasRenderer.materialCount, 0, "Long frames must not indefinitely suppress valid trails: " + mode);
+                    var mesh = (Mesh)typeof(CanvasEffectOutput).GetField("_bridgeOutput", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(output);
+                    Assert.IsNotNull(mesh); Assert.Greater(mesh.vertexCount, 0);
+                    Assert.Greater(mesh.bounds.size.y, .01f, "A live trail must have visible width: " + mode);
+                    var positions = new Vector3[trail.positionCount]; trail.GetPositions(positions);
+                    var nativeBounds = new Bounds(positions[0], Vector3.zero);
+                    foreach (var position in positions) nativeBounds.Encapsulate(position);
+                    Assert.That(output.transform.TransformPoint(mesh.bounds.center).x,
+                        Is.EqualTo(nativeBounds.center.x).Within(.02f), "UI output must follow recorded world positions: " + mode);
+                }
+            }
+            finally
+            {
+                Time.captureDeltaTime = oldCapture; UIEffectRenderer.updateRatePercent = oldRate; UIEffectRenderer.earlyCull = oldCull;
+                Object.DestroyImmediate(root); Object.DestroyImmediate(view); Object.DestroyImmediate(material);
+            }
+            yield return new UnityEngine.TestTools.ExitPlayMode();
+        }
+
+        [UnityEngine.TestTools.UnityTest]
         public System.Collections.IEnumerator RuntimeCadenceAndAlphaRecoveryPreserveNativeSource()
         {
             yield return new UnityEngine.TestTools.EnterPlayMode();

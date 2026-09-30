@@ -70,6 +70,9 @@ namespace ShanFlyer.UIEffects
                     if (!source || !source.gameObject.activeInHierarchy || !visited.Add(source)) continue;
                     var effect = source.GetComponentInParent<UIEffectRenderer>(true);
                     if (effect && !effect.particles.Contains(source)) effect = null;
+                    // Unsupported canvases use native coordinates and playback, not
+                    // the UI bridge's cached scale or particle sharing ownership.
+                    if (effect && !effect.supportsCanvasRendering) effect = null;
                     if (effect && effect.isActiveAndEnabled)
                     {
                         if (effect.isPaused) continue;

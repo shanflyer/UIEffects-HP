@@ -115,7 +115,7 @@ namespace ShanFlyer.UIEffects
         [InitializeOnLoadMethod]
         private static void InstallEditor() { Install(); EditorApplication.playModeStateChanged += _ => { s_FrameCount = -1; Install(); }; }
 #endif
-        private static bool Eligible(UIEffectRenderer p) => p && p.isActiveAndEnabled && p.canvas && !failed.Contains(p);
+        private static bool Eligible(UIEffectRenderer p) => p && p.isActiveAndEnabled && p.supportsCanvasRendering && !failed.Contains(p);
         private static void ClearPlan()
         {
             foreach (var group in groups.Values) { group.Clear(); spareGroups.Push(group); }
@@ -123,7 +123,18 @@ namespace ShanFlyer.UIEffects
         }
         private static void Refresh()
         {
-            if (executing || s_FrameCount == Time.frameCount) return;
+            // Scene/Game repaints and Inspector edits can happen without a game frame
+            // advancing. Only runtime simulation uses the once-per-frame gate.
+            if (executing) return;
+            if (Application.isPlaying && s_FrameCount == Time.frameCount)
+            {
+                // Canvas.ForceUpdateCanvases can reorder UI more than once in a game
+                // frame. Reconcile boundaries without simulating/baking twice.
+                executing = true;
+                try { DepthGroupPlanner.Refresh(registered); }
+                finally { executing = false; }
+                return;
+            }
             s_FrameCount = Time.frameCount; executing = true; UIEffectProfiler.BeginFrame(Time.frameCount);
             try { ExecuteFrame(); }
             catch { planDirty = true; throw; }
@@ -150,20 +161,26 @@ namespace ShanFlyer.UIEffects
             frame.AddRange(registered); frameAttractors.AddRange(attractors);
             foreach (var p in frame)
             {
-                if (Eligible(p)) Guard(p, Prepare);
+                // Also prepare unsupported canvases once to release native source leases
+                // after a runtime Canvas mode/camera change.
+                if (p && p.isActiveAndEnabled) Guard(p, Prepare);
                 CheckLayout(p);
             }
             RebuildPlanIfNeeded();
             foreach (var g in groups.Values)
             {
                 g.separate = false;
+                UIEffectRenderer first = null;
                 foreach (var p in g.members) if (Eligible(p))
-                    g.separate |= p.hasUnmergedFallback || (UIEffectRenderer.mergeRenderers && p.requiresSeparateSharingLayout);
-                if (!g.separate) continue;
+                {
+                    if (!first) first = p;
+                    else g.separate |= !first.HasSameParticlePlan(p);
+                }
                 foreach (var p in g.members)
                 {
-                    if (!Eligible(p) || p.hasUnmergedFallback) continue;
-                    p.RequestUnmergedFallback(); Guard(p, Prepare); dirtyGroups.Add(p.sharingGroup); CheckLayout(p);
+                    if (!Eligible(p)) continue;
+                    Guard(p, g.separate ? ApplySeparateLayout : ApplyCandidateLayout);
+                    CheckLayout(p);
                 }
             }
             // Fallback can replace renderers or change the automatic group identity.
@@ -209,8 +226,25 @@ namespace ShanFlyer.UIEffects
                 if (!g.owner || !Eligible(g.owner))
                     foreach (var p in g.members) if (p) p.ClearRendererMeshes();
             foreach (var a in frameAttractors) if (a && a.isActiveAndEnabled) a.Attract();
+            DepthGroupPlanner.Refresh(frame);
         }
         private static void Update(UIEffectRenderer p) { p.UpdateRenderers(); reported.Remove(p); }
+        private static void ApplySeparateLayout(UIEffectRenderer p)
+        { if (p.ApplySharingLayout(true)) MarkGeometryDirty(p); }
+        private static void ApplyCandidateLayout(UIEffectRenderer p)
+        { if (p.ApplySharingLayout(false)) MarkGeometryDirty(p); }
+
+        // All consumers evaluate the producer's captured workload, not their unsimulated local particles.
+        internal static UIEffectRenderer GetMergeSampleOwner(UIEffectRenderer source)
+        {
+            UIEffectRenderer candidate = null;
+            foreach (var p in registered)
+            {
+                if (!Eligible(p) || !p.useMeshSharing || p.sharingGroup != source.sharingGroup || !p.canSimulate) continue;
+                if (!candidate || (!candidate.isPrimary && p.isPrimary)) candidate = p;
+            }
+            return candidate;
+        }
         private static void Prepare(UIEffectRenderer p)
         {
             bool changed = p.PrepareForUpdate(); var state = (p.sharingGroup, p.useMeshSharing);

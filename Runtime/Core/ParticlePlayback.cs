@@ -27,9 +27,13 @@ namespace ShanFlyer.UIEffects
                 foreach (var source in owner.particles)
                 {
                     if (!source || !visited.Add(source)) continue;
+                    ParticleSourceBinding.TrackPlaybackCommand(source, command);
                     switch (command)
                     {
-                        case ParticleCommand.Restart: source.Simulate(0, false, true, false); break;
+                        case ParticleCommand.Restart:
+                            source.Simulate(0, false, true, false);
+                            if (!owner.supportsCanvasRendering) source.Play(false);
+                            break;
                         case ParticleCommand.Pause: source.Pause(false); break;
                         case ParticleCommand.Stop: source.Stop(false, ParticleSystemStopBehavior.StopEmitting); break;
                         case ParticleCommand.Clear: source.Clear(false); break;
@@ -39,7 +43,9 @@ namespace ShanFlyer.UIEffects
                             emission.enabled = command == ParticleCommand.EnableEmission;
                             break;
                         // Native simulation is owned by the frame scheduler, including resume.
-                        case ParticleCommand.Resume: break;
+                        case ParticleCommand.Resume:
+                            if (!owner.supportsCanvasRendering) source.Play(false);
+                            break;
                     }
                 }
             }

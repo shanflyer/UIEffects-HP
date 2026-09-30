@@ -12,23 +12,25 @@ namespace ShanFlyer.UIEffects
         {
             internal readonly Material source;
             internal readonly Texture texture;
+            internal readonly bool meshUiQueue;
             private readonly UnityEngine.Object owner;
-            internal Key(Material source, Texture texture, UnityEngine.Object owner)
-            { this.source = source; this.texture = texture; this.owner = owner; }
+            internal Key(Material source, Texture texture, UnityEngine.Object owner, bool meshUiQueue)
+            { this.source = source; this.texture = texture; this.owner = owner; this.meshUiQueue = meshUiQueue; }
             public bool Equals(Key other) => ReferenceEquals(source, other.source)
-                && ReferenceEquals(texture, other.texture) && ReferenceEquals(owner, other.owner);
+                && ReferenceEquals(texture, other.texture) && ReferenceEquals(owner, other.owner)
+                && meshUiQueue == other.meshUiQueue;
             public override bool Equals(object other) => other is Key key && Equals(key);
-            public override int GetHashCode() => HashCode.Combine(source, texture, owner);
+            public override int GetHashCode() => HashCode.Combine(source, texture, owner, meshUiQueue);
         }
         private sealed class Variant { internal Material value; internal int users; }
         private static readonly Dictionary<Key, Variant> variants = new();
         private Key key;
         private Variant held;
 
-        internal Material Resolve(Material source, Texture texture, UnityEngine.Object propertyOwner)
+        internal Material Resolve(Material source, Texture texture, UnityEngine.Object propertyOwner, bool meshUiQueue = false)
         {
-            if (!source || (!texture && !propertyOwner)) { Dispose(); return source; }
-            var requested = new Key(source, texture, propertyOwner);
+            if (!source || (!texture && !propertyOwner && !meshUiQueue)) { Dispose(); return source; }
+            var requested = new Key(source, texture, propertyOwner, meshUiQueue);
             if (held == null || !held.value || !key.Equals(requested))
             {
                 Dispose();
@@ -42,7 +44,17 @@ namespace ShanFlyer.UIEffects
             }
             held.value.CopyPropertiesFromMaterial(source);
             if (texture) held.value.mainTexture = texture;
+            if (meshUiQueue) ApplyMeshQueue(held.value);
             return held.value;
+        }
+
+        internal static void ApplyMeshQueue(Material material)
+        {
+            // Scene-view UI is emitted as camera geometry. An opaque queue can put
+            // the mesh before the UI depth-reset draws (and into depth priming).
+            // Queue selection does NOT change ZWrite/ZTest, Blend, Cull or keywords.
+            if (material && material.renderQueue != (int)UnityEngine.Rendering.RenderQueue.Transparent)
+                material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
         }
         public void Dispose()
         {

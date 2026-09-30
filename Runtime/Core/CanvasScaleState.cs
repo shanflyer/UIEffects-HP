@@ -5,7 +5,7 @@ namespace ShanFlyer.UIEffects
     internal sealed class CanvasScaleState
     {
         private RectTransform held;
-        private Vector3 authoredScale;
+        private Vector3 authoredScale, drivenScale;
         private DrivenRectTransformTracker tracker;
         internal Vector3 ParentScale { get; private set; } = Vector3.one;
         internal Vector3 CanvasScale { get; private set; } = Vector3.one;
@@ -30,11 +30,14 @@ namespace ShanFlyer.UIEffects
             }
             var required = EffectScale.Reciprocal(parentScale);
             if (target.localScale != required) target.localScale = required;
+            drivenScale = required;
         }
         internal void Release()
         {
             tracker.Clear();
-            if (held) held.localScale = authoredScale;
+            // A Canvas mode change and an authored scale edit can precede the next
+            // editor repaint. Restore only the value we still own, not that new edit.
+            if (held && held.localScale == drivenScale) held.localScale = authoredScale;
             held = null;
         }
     }

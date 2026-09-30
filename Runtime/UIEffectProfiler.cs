@@ -12,6 +12,8 @@ namespace ShanFlyer.UIEffects
             public int groupPlanRebuilds;
             public int frame, bakeOps, setMeshOps, materialUpdates, meshesCreated;
             public int bridgeCacheHits, maskMeshSubmissions, maskResolveCacheHits;
+            public int meshDepthGroups;
+            public int mergeLayoutChanges;
             public int activeRenderers, mergedRenderers, fallbackEffects;
             public long bakedVertices;
             public double prepareMs, simulateMs, bakeMs, combineMs, submitMs, bridgeCompareMs;

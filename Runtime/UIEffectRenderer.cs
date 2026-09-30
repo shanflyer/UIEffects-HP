@@ -29,6 +29,7 @@ namespace ShanFlyer.UIEffects
         internal bool groupAllAlphaHidden;
         internal bool groupAllClipped;
         internal int activeRendererCount => _activeRendererCount;
+        internal bool mergeSamplingEnabled => mergeRenderers && !hasMaterialPropertyBindings && _outputPlan.particleOutputCount > 1;
         internal int mergedRendererCount
         {
             get { int count = 0; for (int i = 0; i < _activeRendererCount; ++i) if (_renderers[i] && _renderers[i].isMerged) ++count; return count; }
@@ -36,6 +37,8 @@ namespace ShanFlyer.UIEffects
         private bool _mergeModeStamp;
         private bool _sharingEnabledStamp;
         private bool _fallbackToUnmerged;
+        private bool _separateSharingLayout;
+        private double _mergeRetryAfter;
         private bool _rebuildRenderers;
         private bool _rendererBindingsDirty;
         private SimulationRole _sharingModeStamp;
@@ -49,6 +52,7 @@ namespace ShanFlyer.UIEffects
 
         private static Canvas RootCanvas(Canvas value)
         {
+            if (!Application.isPlaying) return value.rootCanvas;
             if (s_RootCanvasFrame != Time.frameCount)
             {
                 s_RootCanvasFrame = Time.frameCount;
@@ -150,7 +154,7 @@ namespace ShanFlyer.UIEffects
             if (particles.Count == 0) RefreshSources();
             else RefreshSources(particles);
             RefreshSharingIdentity();
-            SpriteMaskNativeRendering.Register(this);
+            if (supportsCanvasRendering) SpriteMaskNativeRendering.Register(this);
             UIEffectScheduler.Register(this);
         }
 
@@ -217,7 +221,8 @@ namespace ShanFlyer.UIEffects
             foreach (Transform child in transform)
             {
                 if (instance.transform.IsChildOf(child) || child.gameObject == instance) continue;
-                if (child.TryGetComponent<CanvasEffectOutput>(out _) || child.TryGetComponent<CanvasSpriteMaskGraphic>(out _)) continue;
+                if (child.TryGetComponent<CanvasEffectOutput>(out _) || child.TryGetComponent<CanvasSpriteMaskGraphic>(out _)
+                    || child.TryGetComponent<CanvasDepthResetGraphic>(out _)) continue;
                 if (_bakeView.Owns(child)) continue;
                 retired.Add(child.gameObject);
             }
@@ -272,6 +277,7 @@ namespace ShanFlyer.UIEffects
             }
             _particleBindings.Clear();
             _particleBindings.AddRange(particleSystems);
+            if (!RefreshCanvasSupport()) return;
             // Preserve slot identity despite Canvas sibling reordering; discover orphan outputs only on refresh.
             for (int i = 0; i < transform.childCount; ++i)
                 if (transform.GetChild(i).TryGetComponent<CanvasEffectOutput>(out var output)
@@ -285,16 +291,15 @@ namespace ShanFlyer.UIEffects
             _rendererBindingsDirty = true;
             _rebuildRenderers = false;
 
-            bool allowMerge = mergeRenderers && !m_SortBySourceOrder && !_fallbackToUnmerged
+            bool allowMerge = mergeRenderers && !_fallbackToUnmerged
                 && !hasMaterialPropertyBindings;
-            // Shared effects retain one common layout. Independent effects may merge consecutive runs.
-            if (useMeshSharing && !CanvasEffectOutput.CanMerge(particleSystems)) allowMerge = false;
             sourceTopology.Rebuild(particleSystems);
             try
             {
                 _outputPlan.Build(this, particleSystems, allowMerge);
                 PlanBridgeSources(_outputPlan);
-                _outputPlan.Apply(this);
+                _outputPlan.Finish();
+                _outputPlan.Apply(this, useMeshSharing && _separateSharingLayout);
             }
             catch { _outputPlan.Clear(); _rebuildRenderers = true; throw; }
         }
@@ -302,7 +307,11 @@ namespace ShanFlyer.UIEffects
         internal void ReleaseChangedOutputs(HashSet<CanvasEffectOutput> retained)
         {
             for (int i = 0; i < _renderers.Count; ++i)
-                if (_renderers[i] && !retained.Contains(_renderers[i])) _renderers[i].Reset(i);
+                if (_renderers[i] && !retained.Contains(_renderers[i]))
+                {
+                    _renderers[i].PreservePendingSimulation();
+                    _renderers[i].Reset(i);
+                }
             _activeRendererCount = 0;
         }
 
@@ -336,6 +345,7 @@ namespace ShanFlyer.UIEffects
 
         internal bool PrepareForUpdate()
         {
+            if (!RefreshCanvasSupport()) return false;
             if (_configurationPending)
             {
                 NormalizeConfiguration();
@@ -369,7 +379,24 @@ namespace ShanFlyer.UIEffects
                 for (var i = 0; i < _activeRendererCount; i++)
                     if (_renderers[i] == null || _renderers[i].bindingIsInvalid) _rebuildRenderers = true;
             }
+            if (_fallbackToUnmerged && Time.realtimeSinceStartupAsDouble >= _mergeRetryAfter)
+            {
+                _fallbackToUnmerged = false;
+                _rebuildRenderers = true;
+            }
             if (_rebuildRenderers) RefreshSources(particles);
+            else if (_outputPlan.NeedsReview(this))
+            {
+                try
+                {
+                    CollectBridgeSources();
+                    _outputPlan.Build(this, particles, mergeRenderers && !_fallbackToUnmerged && !hasMaterialPropertyBindings);
+                    PlanBridgeSources(_outputPlan);
+                    _outputPlan.Finish();
+                    _rendererBindingsDirty |= _outputPlan.Apply(this, useMeshSharing && _separateSharingLayout, false);
+                }
+                catch { _outputPlan.Clear(); _rebuildRenderers = true; throw; }
+            }
 
             SpriteMaskNativeRendering.Sync(this);
             UpdateTransformScale();
@@ -393,25 +420,33 @@ namespace ShanFlyer.UIEffects
         {
             if (_fallbackToUnmerged && _mergeModeStamp == mergeRenderers) return;
             _fallbackToUnmerged = true;
+            _mergeRetryAfter = Time.realtimeSinceStartupAsDouble + 2;
             _mergeModeStamp = mergeRenderers;
             _rebuildRenderers = true;
         }
 
-        internal bool requiresSeparateSharingLayout => needsSpriteMaskIsolation
-            || hasMaterialPropertyBindings || !CanvasEffectOutput.CanMerge(particles);
-
         internal bool hasUnmergedFallback => _fallbackToUnmerged && _mergeModeStamp == mergeRenderers;
 
-        internal bool needsSpriteMaskIsolation
+        internal bool HasSameParticlePlan(UIEffectRenderer other) => _outputPlan.SameParticleLayout(other._outputPlan);
+
+        internal bool ApplySharingLayout(bool separate)
         {
-            get
-            {
-                if (m_SortBySourceOrder) return true; // Group-wide separate slots also preserve mixed source ordering.
-                foreach (var ps in particles)
-                    if (ps && ps.TryGetComponent<ParticleSystemRenderer>(out var renderer)
-                        && renderer.maskInteraction != SpriteMaskInteraction.None) return true;
-                return false;
-            }
+            if (_separateSharingLayout == separate) return false;
+            _separateSharingLayout = separate;
+            try { if (!_outputPlan.Apply(this, separate, false)) return false; }
+            catch { _rebuildRenderers = true; throw; }
+            _rendererBindingsDirty = true;
+            OrderSourceOutputs();
+            for (int i = 0; i < _activeRendererCount; ++i)
+                if (_renderers[i]) _renderers[i].PrepareSpriteMask();
+            return true;
+        }
+
+        internal bool ContainsMergedRun(List<ParticleSystem> sources)
+        {
+            for (int i = 0; i < _activeRendererCount; ++i)
+                if (_renderers[i] && _renderers[i].ContainsMergedRun(sources)) return true;
+            return false;
         }
 
         /// <summary>

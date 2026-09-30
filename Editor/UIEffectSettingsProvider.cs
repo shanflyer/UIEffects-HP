@@ -30,7 +30,7 @@ namespace ShanFlyer.UIEffects
                 Field(data, "staggerUpdates", "Stagger Updates",
                     "Spread reduced-rate updates across frames. Shared particles remain synchronized. Only applies below 100%.");
                 Field(data, "mergeParticleOutputs", "Merge Particle Outputs",
-                    "Merge compatible particle outputs to reduce UI submissions. Each particle system still bakes separately. Disable for custom MPB uniforms not declared in shader Properties.");
+                    "Allow adaptive merging of consecutive compatible particles after source sorting. Uses captured mesh size, bounds and visibility to estimate benefit; small workloads can merge, costly groups stay separate. Each system still bakes separately. Disable for custom MPB uniforms not declared in shader Properties.");
                 var cull = data.FindProperty("invisibleWorkMode");
                 cull.intValue = EditorGUILayout.Popup(new GUIContent("Hidden Output Handling",
                     "Skip Rendering keeps particle simulation running. Pause Simulation also pauses transparent-hidden particles. Fully clipped outputs are checked periodically for visibility recovery."), Mathf.Clamp(cull.intValue, 0, 2), CullModes);

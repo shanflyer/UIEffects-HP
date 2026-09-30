@@ -12,6 +12,16 @@ Rendering through Canvas does not automatically make a material support UI masks
 
 UI Effects HP does not convert arbitrary source shaders. Each material slot, including a particle's Trail material, must support the UI features it uses. Native lighting and Renderer-specific shader inputs are not automatically reproduced by adding stencil support.
 
+## Mesh depth and Canvas support
+
+Stencil is not required for an unmasked mesh. Ordinary materials can draw through Canvas, including textureless materials. Keep the source mesh material's depth test, depth writes, face culling and blending: disabling depth writes can break self-occlusion and occlusion between submeshes. Transparent materials retain their existing transparency/sorting limitations.
+
+The mesh submission uses a material copy with render queue 3000. Scene-view rendering emits UI as camera geometry; retaining a mesh's opaque queue can separate it from the UI depth-reset draws and expose it to the opaque/depth-priming path. Selecting the UI queue does not change the material's surface type, blend mode, depth state, culling or shader keywords. Source assets keep their original queue. The queue is reapplied after material-property synchronization. Mesh bounds retain their complete 3D volume; clipping rectangles are calculated from that volume instead of flattening the mesh bounds. Depth-reset bounds include their mesh group's volume as well as the Canvas plane.
+
+Consecutive mesh and skinned-mesh outputs form an automatic depth group. Depth-only helper draws reset depth before the first and after the last output, without changing color or stencil. Within the group, depth-writing surfaces occlude one another by geometry depth. Between groups and ordinary UI, Canvas draw order applies. Other effect types, nested Canvas and active Mask/RectMask2D boundaries separate groups; no numeric group setting is exposed. These helpers use a dedicated shader and do not modify source shaders or materials. They bypass RectMask2D and keep all stencil bits; the visible mesh itself still needs the normal masking contract.
+
+Supported canvases are Screen Space - Overlay and Screen Space - Camera with an assigned, dedicated UI camera. Start the UI camera with cleared depth, render it after the scene, and do not require its discarded depth in subsequent passes/cameras. Shared scene/UI cameras and scene-depth preservation are outside this contract. World Space bypasses the bridge and restores native sources. Game and Scene views still use their own projections and lighting; this feature does not reproduce missing Renderer-specific shader inputs.
+
 ## Generate Unity particle shaders
 
 Open **Project Settings → UI Effects HP → Generate Particle Shaders...**, or **Tools → UI Effects HP → Generate Particle Shaders**. Select **Built-in** or **URP** and click **Generate Shaders**. A different active pipeline prompts **Generate Anyway / Cancel**; it does not prevent generation.
@@ -59,12 +69,9 @@ Stencil
     ZFail Keep
 }
 ColorMask [_ColorMask]
-ZWrite Off
-ZTest [unity_GUIZTestMode]
-Cull Off
 ```
 
-Keep the appropriate transparent blending for your effect. UGUI and the SpriteMask bridge supply stencil values at runtime: do not assign fixed stencil IDs or synchronize these reserved properties through Material Property Synchronization.
+Keep the existing mesh pass's depth, culling and blending state. For flat transparent sprites/particles, `ZWrite Off` and `ZTest [unity_GUIZTestMode]` are common UI settings; they are not a requirement for opaque meshes. UGUI and the SpriteMask bridge supply stencil values at runtime: do not assign fixed stencil IDs or synchronize these reserved properties through Material Property Synchronization.
 
 ## RectMask2D and alpha clipping
 

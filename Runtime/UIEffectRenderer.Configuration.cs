@@ -12,7 +12,7 @@ namespace ShanFlyer.UIEffects
         public enum OriginMode { Effect, Emitter }
         public enum UnitConversion { Manual, Automatic }
 
-        [SerializeField, Tooltip("Automatic converts world units to UI units. Manual keeps the authored scale and Canvas scaling policy.")]
+        [SerializeField, Tooltip("Automatic converts source geometry to UI units; world-space lines and trails keep their recorded positions and widths. Manual keeps the authored scale and Canvas scaling policy.")]
         private UnitConversion unitConversionValue = UnitConversion.Automatic;
         [SerializeField, Tooltip("Optional reference for world-to-screen sizing. Otherwise uses the Canvas camera. Without a camera, uses Canvas Reference Pixels Per Unit.")]
         private Camera referenceCameraValue;
@@ -51,9 +51,8 @@ namespace ShanFlyer.UIEffects
             set => SetConfiguration(ref referenceCameraValue, value);
         }
         public float resolvedUnitScale => unitConversion == UnitConversion.Automatic ? _automaticUnitScale : 1;
-        internal bool normalizesRoot => unitConversion == UnitConversion.Automatic
-            ? canvas && canvas.rootCanvas.renderMode != RenderMode.WorldSpace
-            : scaleMode == ScaleMode.NormalizeRoot;
+        internal bool normalizesRoot => supportsCanvasRendering
+            && (unitConversion == UnitConversion.Automatic || scaleMode == ScaleMode.NormalizeRoot);
 
         public float uniformScale { get => renderScaleValue.x; set => renderScale = Vector3.one * value; }
         public Vector3 renderScale

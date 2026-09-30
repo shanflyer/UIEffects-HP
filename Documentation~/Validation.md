@@ -19,6 +19,10 @@ Do not combine `-quit` with `-runTests`. Use a graphics device for geometry and 
 
 ## Verified behavior
 
+The results below predate automatic mesh depth groups and the screen-space-only support boundary. They do not validate depth resets. The current depth-group changes pass standalone C# compilation against Unity 2022.3.62f3 and Unity 6000.4.7f1, including runtime/editor assemblies and player conditional paths. Scene/GPU tests and a Player build were not run for these changes. Older World Space rendering fixtures and comparison tools need migration before they can validate the current bridge contract; World Space now deliberately keeps native rendering.
+
+The adaptive, source-ordered particle merge implementation has also passed standalone C# compilation for both versions, including runtime/editor assemblies and player conditional paths. Scene/GPU validation and frame-time benchmarks have not been run for this change. Older tests that expect immediate merging must be updated for the capture warm-up and workload policy; historical pass counts below do not validate adaptive merging.
+
 The automatic-sizing implementation passed **180/180 EditMode tests** on both Unity 2022.3.62f3 and Unity 6000.4.7f1 using D3D11, with no failures or skipped tests. Coverage includes renderer placement, sprite texture resolution, automatic unit conversion, old prefab migration, paused geometry invalidation, sharing, masking and scheduling.
 
 Earlier separate D3D11 GPU comparisons passed **123/123** on both versions. Shader generation and a Windows Player smoke build were also checked on Unity 2022.3.62f3. These separate GPU and Player checks were not rerun for automatic sizing.

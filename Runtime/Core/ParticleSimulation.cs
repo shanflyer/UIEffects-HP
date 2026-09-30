@@ -9,11 +9,20 @@ namespace ShanFlyer.UIEffects
         private uint cycle;
         private bool prepareCycle = true;
         private int advancedFrame = -1;
+        private float carriedSeconds;
+        private uint carriedCycle;
+
+        internal void Carry(float seconds, uint playbackCycle)
+        {
+            if (carriedCycle != playbackCycle) carriedSeconds = 0;
+            carriedCycle = playbackCycle;
+            if (seconds > 0 && float.IsFinite(seconds)) carriedSeconds += seconds;
+        }
 
         internal void Advance(ParticleSystem source, UIEffectRenderer owner, float elapsed)
         {
             if (!Application.isPlaying || !source || !owner || owner.isPaused) return;
-            float seconds = elapsed * owner.simulationSpeed;
+            float seconds = (elapsed + (carriedCycle == owner.playbackCycle ? carriedSeconds : 0)) * owner.simulationSpeed;
             if (!(seconds > 0) || !float.IsFinite(seconds)) return;
             if (controller != owner || cycle != owner.playbackCycle)
             {
@@ -22,6 +31,7 @@ namespace ShanFlyer.UIEffects
                 prepareCycle = true;
             }
             if (advancedFrame == Time.frameCount) return;
+            carriedSeconds = 0;
             var settings = source.main;
             if (prepareCycle)
             {

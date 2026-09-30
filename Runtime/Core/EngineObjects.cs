@@ -42,4 +42,21 @@ namespace ShanFlyer.UIEffects.Internal
             return sprite ? sprite.texture : null;
         }
     }
+
+    internal static class MaterialTexture
+    {
+        // Material.mainTexture reports an error for valid textureless shaders.
+        // Respect [MainTexture], including SRP/custom names, before the legacy fallback.
+        internal static Texture Resolve(Material material)
+        {
+            if (!material || !material.shader) return null;
+            if (material.HasProperty("_MainTex")) return material.mainTexture;
+            var shader = material.shader;
+            for (int i = 0; i < shader.GetPropertyCount(); ++i)
+                if (shader.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Texture
+                    && (shader.GetPropertyFlags(i) & UnityEngine.Rendering.ShaderPropertyFlags.MainTexture) != 0)
+                    return material.GetTexture(shader.GetPropertyNameId(i));
+            return null;
+        }
+    }
 }

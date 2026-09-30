@@ -19,7 +19,7 @@ namespace ShanFlyer.UIEffects
         internal static void Set(UIEffectRenderer effect, bool playing)
         {
             if (Application.isPlaying) return;
-            if (playing) { if (Playing.Count == 0) previous = EditorApplication.timeSinceStartup; Playing.Add(effect); }
+            if (playing && effect.supportsCanvasRendering) { if (Playing.Count == 0) previous = EditorApplication.timeSinceStartup; Playing.Add(effect); }
             else Playing.Remove(effect);
         }
         private static void Advance()
@@ -30,7 +30,7 @@ namespace ShanFlyer.UIEffects
             Snapshot.Clear(); Snapshot.AddRange(Playing);
             foreach (var effect in Snapshot)
             {
-                if (!effect || !effect.isActiveAndEnabled) { Playing.Remove(effect); continue; }
+                if (!effect || !effect.isActiveAndEnabled || !effect.supportsCanvasRendering) { Playing.Remove(effect); continue; }
                 effect.sourceTopology.Rebuild(effect.particles);
                 foreach (var source in effect.particles)
                     if (source && !effect.sourceTopology.ParentOf(source)) source.Simulate(delta * Mathf.Max(0, effect.simulationSpeed), false, false, false);
